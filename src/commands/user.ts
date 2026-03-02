@@ -1,7 +1,9 @@
 import chalk from 'chalk';
-import { workosRequest, WorkOSApiError } from '../lib/workos-api.js';
+import { workosRequest } from '../lib/workos-api.js';
 import type { WorkOSListResponse } from '../lib/workos-api.js';
 import { formatTable } from '../utils/table.js';
+import { outputSuccess, outputJson, isJsonMode } from '../utils/output.js';
+import { createApiErrorHandler } from '../lib/api-error-handler.js';
 
 interface User {
   id: string;
@@ -13,22 +15,7 @@ interface User {
   updated_at: string;
 }
 
-function handleApiError(error: unknown): never {
-  if (error instanceof WorkOSApiError) {
-    if (error.statusCode === 401) {
-      console.error(chalk.red('Invalid API key. Check your environment configuration.'));
-    } else if (error.statusCode === 404) {
-      console.error(chalk.red('User not found.'));
-    } else if (error.statusCode === 422 && error.errors?.length) {
-      console.error(chalk.red(error.errors.map((e) => e.message).join(', ')));
-    } else {
-      console.error(chalk.red(error.message));
-    }
-  } else {
-    console.error(chalk.red(error instanceof Error ? error.message : 'Unknown error'));
-  }
-  process.exit(1);
-}
+const handleApiError = createApiErrorHandler('User');
 
 export async function runUserGet(userId: string, apiKey: string, baseUrl?: string): Promise<void> {
   try {
@@ -38,7 +25,7 @@ export async function runUserGet(userId: string, apiKey: string, baseUrl?: strin
       apiKey,
       baseUrl,
     });
-    console.log(JSON.stringify(user, null, 2));
+    outputJson(user);
   } catch (error) {
     handleApiError(error);
   }
@@ -69,6 +56,11 @@ export async function runUserList(options: UserListOptions, apiKey: string, base
         order: options.order,
       },
     });
+
+    if (isJsonMode()) {
+      outputJson({ data: result.data, list_metadata: result.list_metadata });
+      return;
+    }
 
     if (result.data.length === 0) {
       console.log('No users found.');
@@ -138,8 +130,7 @@ export async function runUserUpdate(
       baseUrl,
       body,
     });
-    console.log(chalk.green('Updated user'));
-    console.log(JSON.stringify(user, null, 2));
+    outputSuccess('Updated user', user);
   } catch (error) {
     handleApiError(error);
   }
@@ -153,7 +144,7 @@ export async function runUserDelete(userId: string, apiKey: string, baseUrl?: st
       apiKey,
       baseUrl,
     });
-    console.log(chalk.green(`Deleted user ${userId}`));
+    outputSuccess('Deleted user', { id: userId });
   } catch (error) {
     handleApiError(error);
   }

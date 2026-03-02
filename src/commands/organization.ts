@@ -1,7 +1,9 @@
 import chalk from 'chalk';
-import { workosRequest, WorkOSApiError } from '../lib/workos-api.js';
+import { workosRequest } from '../lib/workos-api.js';
 import type { WorkOSListResponse } from '../lib/workos-api.js';
 import { formatTable } from '../utils/table.js';
+import { outputSuccess, outputJson, isJsonMode } from '../utils/output.js';
+import { createApiErrorHandler } from '../lib/api-error-handler.js';
 
 interface OrganizationDomain {
   id: string;
@@ -32,22 +34,7 @@ export function parseDomainArgs(args: string[]): DomainData[] {
   });
 }
 
-function handleApiError(error: unknown): never {
-  if (error instanceof WorkOSApiError) {
-    if (error.statusCode === 401) {
-      console.error(chalk.red('Invalid API key. Check your environment configuration.'));
-    } else if (error.statusCode === 404) {
-      console.error(chalk.red(`Organization not found.`));
-    } else if (error.statusCode === 422 && error.errors?.length) {
-      console.error(chalk.red(error.errors.map((e) => e.message).join(', ')));
-    } else {
-      console.error(chalk.red(error.message));
-    }
-  } else {
-    console.error(chalk.red(error instanceof Error ? error.message : 'Unknown error'));
-  }
-  process.exit(1);
-}
+const handleApiError = createApiErrorHandler('Organization');
 
 export async function runOrgCreate(
   name: string,
@@ -69,8 +56,7 @@ export async function runOrgCreate(
       baseUrl,
       body,
     });
-    console.log(chalk.green('Created organization'));
-    console.log(JSON.stringify(org, null, 2));
+    outputSuccess('Created organization', org);
   } catch (error) {
     handleApiError(error);
   }
@@ -97,8 +83,7 @@ export async function runOrgUpdate(
       baseUrl,
       body,
     });
-    console.log(chalk.green('Updated organization'));
-    console.log(JSON.stringify(org, null, 2));
+    outputSuccess('Updated organization', org);
   } catch (error) {
     handleApiError(error);
   }
@@ -112,7 +97,7 @@ export async function runOrgGet(orgId: string, apiKey: string, baseUrl?: string)
       apiKey,
       baseUrl,
     });
-    console.log(JSON.stringify(org, null, 2));
+    outputJson(org);
   } catch (error) {
     handleApiError(error);
   }
@@ -141,6 +126,11 @@ export async function runOrgList(options: OrgListOptions, apiKey: string, baseUr
         order: options.order,
       },
     });
+
+    if (isJsonMode()) {
+      outputJson({ data: result.data, list_metadata: result.list_metadata });
+      return;
+    }
 
     if (result.data.length === 0) {
       console.log('No organizations found.');
@@ -176,7 +166,7 @@ export async function runOrgDelete(orgId: string, apiKey: string, baseUrl?: stri
       apiKey,
       baseUrl,
     });
-    console.log(chalk.green(`Deleted organization ${orgId}`));
+    outputSuccess('Deleted organization', { id: orgId });
   } catch (error) {
     handleApiError(error);
   }

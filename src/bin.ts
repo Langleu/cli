@@ -28,7 +28,23 @@ if (!satisfies(process.version, NODE_VERSION_RANGE)) {
 }
 
 import { isNonInteractiveEnvironment } from './utils/environment.js';
+import { resolveOutputMode, setOutputMode, outputJson, exitWithError } from './utils/output.js';
 import clack from './utils/clack.js';
+
+// Resolve output mode early from raw argv (before yargs parses)
+const rawArgs = hideBin(process.argv);
+const hasJsonFlag = rawArgs.includes('--json');
+setOutputMode(resolveOutputMode(hasJsonFlag));
+
+// Intercept --help --json before yargs parses (yargs exits on --help)
+if (hasJsonFlag && (rawArgs.includes('--help') || rawArgs.includes('-h'))) {
+  const { buildCommandTree } = await import('./utils/help-json.js');
+  const commandAliases: Record<string, string> = { org: 'organization' };
+  const rawCommand = rawArgs.find((a) => !a.startsWith('-'));
+  const command = rawCommand ? (commandAliases[rawCommand] ?? rawCommand) : undefined;
+  outputJson(buildCommandTree(command));
+  process.exit(0);
+}
 
 /** Apply insecure storage flag if set */
 async function applyInsecureStorage(insecureStorage?: boolean): Promise<void> {
@@ -94,11 +110,11 @@ const installerOptions = {
   },
   'api-key': {
     type: 'string' as const,
-    hidden: true,
+    describe: 'WorkOS API key (required in non-interactive mode)',
   },
   'client-id': {
     type: 'string' as const,
-    hidden: true,
+    describe: 'WorkOS client ID (required in non-interactive mode)',
   },
   inspect: {
     default: false,
@@ -114,9 +130,9 @@ const installerOptions = {
     describe: 'Redirect URI for WorkOS callback (defaults to framework convention)',
     type: 'string' as const,
   },
-  'no-validate': {
-    default: false,
-    describe: 'Skip post-installation validation (includes build check)',
+  validate: {
+    default: true,
+    describe: 'Run post-installation validation (use --no-validate to skip)',
     type: 'boolean' as const,
   },
   'install-dir': {
@@ -138,27 +154,53 @@ const installerOptions = {
     describe: 'Run with visual dashboard mode',
     type: 'boolean' as const,
   },
+  branch: {
+    default: true,
+    describe: 'Create a new branch for changes (use --no-branch to skip)',
+    type: 'boolean' as const,
+  },
+  commit: {
+    default: true,
+    describe: 'Auto-commit after installation (use --no-commit to skip)',
+    type: 'boolean' as const,
+  },
+  'create-pr': {
+    default: false,
+    describe: 'Auto-create pull request after installation',
+    type: 'boolean' as const,
+  },
+  'git-check': {
+    default: true,
+    describe: 'Check for dirty working tree (use --no-git-check to skip)',
+    type: 'boolean' as const,
+  },
 };
 
 // Check for updates (blocks up to 500ms)
 await checkForUpdates();
 
-yargs(hideBin(process.argv))
+yargs(rawArgs)
   .env('WORKOS_INSTALLER')
-  .command('login', 'Authenticate with WorkOS', insecureStorageOption, async (argv) => {
+  .option('json', {
+    type: 'boolean',
+    default: false,
+    describe: 'Output results as JSON (auto-enabled in non-TTY)',
+    global: true,
+  })
+  .command('login', 'Authenticate with WorkOS via browser-based OAuth', insecureStorageOption, async (argv) => {
     await applyInsecureStorage(argv.insecureStorage);
     const { runLogin } = await import('./commands/login.js');
     await runLogin();
     process.exit(0);
   })
-  .command('logout', 'Remove stored credentials', insecureStorageOption, async (argv) => {
+  .command('logout', 'Remove stored WorkOS credentials and tokens', insecureStorageOption, async (argv) => {
     await applyInsecureStorage(argv.insecureStorage);
     const { runLogout } = await import('./commands/logout.js');
     await runLogout();
   })
   .command(
     'install-skill',
-    'Install bundled AuthKit skills to coding agents',
+    'Install bundled AuthKit skills to coding agents (Claude Code, Codex, Cursor, Goose)',
     (yargs) => {
       return yargs
         .option('list', {
@@ -190,7 +232,7 @@ yargs(hideBin(process.argv))
   )
   .command(
     'doctor',
-    'Diagnose WorkOS integration issues',
+    'Diagnose WorkOS AuthKit integration issues in the current project',
     (yargs) =>
       yargs.options({
         verbose: {
@@ -229,7 +271,8 @@ yargs(hideBin(process.argv))
       await handleDoctor(argv);
     },
   )
-  .command('env', 'Manage environment configurations', (yargs) =>
+  // NOTE: When adding commands here, also update src/utils/help-json.ts
+  .command('env', 'Manage environment configurations (API keys, endpoints, active environment)', (yargs) =>
     yargs
       .options(insecureStorageOption)
       .command(
@@ -267,6 +310,12 @@ yargs(hideBin(process.argv))
         'Switch active environment',
         (yargs) => yargs.positional('name', { type: 'string', describe: 'Environment name' }),
         async (argv) => {
+          if (!argv.name && isNonInteractiveEnvironment()) {
+            exitWithError({
+              code: 'missing_args',
+              message: 'Environment name required. Usage: workos env switch <name>',
+            });
+          }
           await applyInsecureStorage(argv.insecureStorage);
           const { runEnvSwitch } = await import('./commands/env.js');
           await runEnvSwitch(argv.name);
@@ -285,19 +334,26 @@ yargs(hideBin(process.argv))
       .demandCommand(1, 'Please specify an env subcommand')
       .strict(),
   )
-  .command('organization', 'Manage organizations', (yargs) =>
+  .command(['organization', 'org'], 'Manage WorkOS organizations (create, update, get, list, delete)', (yargs) =>
     yargs
       .options({
         ...insecureStorageOption,
-        'api-key': { type: 'string' as const, describe: 'WorkOS API key (overrides environment config)' },
+        'api-key': {
+          type: 'string' as const,
+          describe: 'WorkOS API key (overrides environment config). Format: sk_live_* or sk_test_*',
+        },
       })
       .command(
         'create <name> [domains..]',
-        'Create a new organization',
+        'Create a new organization with optional verified domains',
         (yargs) =>
           yargs
             .positional('name', { type: 'string', demandOption: true, describe: 'Organization name' })
-            .positional('domains', { type: 'string', array: true, describe: 'Domains as domain:state' }),
+            .positional('domains', {
+              type: 'string',
+              array: true,
+              describe: 'Domains in format domain:state (state defaults to verified)',
+            }),
         async (argv) => {
           await applyInsecureStorage(argv.insecureStorage);
           const { resolveApiKey, resolveApiBaseUrl } = await import('./lib/api-key.js');
@@ -373,11 +429,14 @@ yargs(hideBin(process.argv))
       .demandCommand(1, 'Please specify an organization subcommand')
       .strict(),
   )
-  .command('user', 'Manage users', (yargs) =>
+  .command('user', 'Manage WorkOS users (get, list, update, delete)', (yargs) =>
     yargs
       .options({
         ...insecureStorageOption,
-        'api-key': { type: 'string' as const, describe: 'WorkOS API key (overrides environment config)' },
+        'api-key': {
+          type: 'string' as const,
+          describe: 'WorkOS API key (overrides environment config). Format: sk_live_* or sk_test_*',
+        },
       })
       .command(
         'get <userId>',
@@ -465,7 +524,7 @@ yargs(hideBin(process.argv))
   )
   .command(
     'install',
-    'Install WorkOS AuthKit into your project',
+    'Install WorkOS AuthKit into your project (interactive framework detection and setup)',
     (yargs) => yargs.options(installerOptions),
     withAuth(async (argv) => {
       const { handleInstall } = await import('./commands/install.js');
@@ -488,7 +547,7 @@ yargs(hideBin(process.argv))
     async (argv) => {
       // Non-TTY: show help
       if (isNonInteractiveEnvironment()) {
-        yargs(hideBin(process.argv)).showHelp();
+        yargs(rawArgs).showHelp();
         return;
       }
 
