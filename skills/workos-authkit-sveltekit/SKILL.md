@@ -9,7 +9,7 @@ description: Integrate WorkOS AuthKit with SvelteKit. Server-side authentication
 
 **STOP. Do not proceed until complete.**
 
-WebFetch: `https://github.com/workos/authkit-sveltekit/blob/main/README.md`
+WebFetch: `https://raw.githubusercontent.com/workos/authkit-sveltekit/main/README.md`
 
 The README is the source of truth. If this skill conflicts with README, follow README.
 
@@ -32,15 +32,63 @@ Check `.env` or `.env.local` for:
 
 SvelteKit uses `$env/static/private` and `$env/dynamic/private` natively. The agent should write env vars to `.env` (SvelteKit's default) or `.env.local`.
 
+## Step 2b: Partial Install Recovery
+
+Before installing the SDK, check if a previous AuthKit attempt already exists:
+
+1. Check if `@workos/authkit-sveltekit` is already in `package.json`
+2. Check for incomplete setup signals:
+   - `src/hooks.server.ts` has commented-out `authkitHandle` import or exports a passthrough handle
+   - `src/routes/+layout.server.ts` has TODO comments about loading the session
+   - No callback `+server.ts` route exists in `src/routes/`
+   - No `WORKOS_COOKIE_PASSWORD` in `.env`
+3. If partial install detected:
+   - Do NOT reinstall the SDK (it's already there)
+   - Read existing files to understand what's done vs missing
+   - Complete the integration by filling gaps rather than starting fresh
+   - The most common gap is the missing callback route — create it
+   - Wire up `authkitHandle` in hooks.server.ts properly (use `sequence()` if other hooks exist)
+   - Complete the layout load function
+   - Ensure `WORKOS_COOKIE_PASSWORD` is set in `.env`
+
+## Step 2c: Existing Auth System Detection
+
+Check for existing authentication before integrating:
+
+```
+package.json has 'lucia'?              → Lucia v3 session auth
+package.json has '@auth0/auth0-spa-js'? → Auth0 SPA auth
+package.json has '@auth/sveltekit'?    → Auth.js SvelteKit
+src/hooks.server.ts handles cookies?   → Custom session middleware
+```
+
+If existing auth detected (Lucia is most common in SvelteKit):
+
+- Do NOT remove or disable the existing auth system
+- Use `sequence()` from `@sveltejs/kit/hooks` to compose handles:
+
+  ```typescript
+  import { sequence } from '@sveltejs/kit/hooks';
+  import { authkitHandle } from '@workos/authkit-sveltekit';
+
+  // Keep existing handle, compose with AuthKit
+  export const handle = sequence(authkitHandle, existingHandle);
+  ```
+
+- AuthKit handle should come FIRST in `sequence()` so it runs before other middleware
+- Create separate WorkOS routes if `/login` or `/callback` are already taken (e.g., use `/auth/callback`)
+- Ensure existing auth routes, form actions, and session cookies continue to work unchanged
+- Document in code comments how to migrate fully to WorkOS AuthKit later
+
 ## Step 3: Install SDK
 
 Detect package manager, install SDK package from README.
 
 ```
-pnpm-lock.yaml? → pnpm add @workos-inc/authkit-sveltekit
-yarn.lock? → yarn add @workos-inc/authkit-sveltekit
-bun.lockb? → bun add @workos-inc/authkit-sveltekit
-else → npm install @workos-inc/authkit-sveltekit
+pnpm-lock.yaml? → pnpm add @workos/authkit-sveltekit
+yarn.lock? → yarn add @workos/authkit-sveltekit
+bun.lockb? → bun add @workos/authkit-sveltekit
+else → npm install @workos/authkit-sveltekit
 ```
 
 **Verify:** SDK package exists in node_modules before continuing.
@@ -57,7 +105,7 @@ If `src/hooks.server.ts` already exists with custom logic, use SvelteKit's `sequ
 
 ```typescript
 import { sequence } from '@sveltejs/kit/hooks';
-import { authkitHandle } from '@workos-inc/authkit-sveltekit'; // Check README for exact export
+import { authkitHandle } from '@workos/authkit-sveltekit'; // Check README for exact export
 
 export const handle = sequence(authkitHandle, yourExistingHandle);
 ```
@@ -126,7 +174,7 @@ pnpm build || npm run build
 
 ## Error Recovery
 
-### "Cannot find module '@workos-inc/authkit-sveltekit'"
+### "Cannot find module '@workos/authkit-sveltekit'"
 
 - Check: SDK installed before writing imports
 - Check: SDK package directory exists in node_modules
