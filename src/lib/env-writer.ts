@@ -3,29 +3,31 @@ import { join } from 'path';
 import { parseEnvFile } from '../utils/env-parser.js';
 
 const ENV_LOCAL_COVERING_PATTERNS = ['.env.local', '.env*.local', '.env*'];
+const ENV_COVERING_PATTERNS = ['.env', '.env*'];
 
 /**
- * Ensure .env.local is in .gitignore.
+ * Ensure the given env filename is in .gitignore.
  * Creates .gitignore if it doesn't exist.
  * No-ops if a covering pattern is already present.
  */
-function ensureGitignore(installDir: string): void {
+function ensureGitignore(installDir: string, filename: '.env' | '.env.local'): void {
   const gitignorePath = join(installDir, '.gitignore');
+  const coveringPatterns = filename === '.env' ? ENV_COVERING_PATTERNS : ENV_LOCAL_COVERING_PATTERNS;
 
   if (!existsSync(gitignorePath)) {
-    writeFileSync(gitignorePath, '.env.local\n');
+    writeFileSync(gitignorePath, `${filename}\n`);
     return;
   }
 
   const content = readFileSync(gitignorePath, 'utf-8');
   const lines = content.split('\n').map((line) => line.trim());
 
-  if (lines.some((line) => ENV_LOCAL_COVERING_PATTERNS.includes(line))) {
+  if (lines.some((line) => coveringPatterns.includes(line))) {
     return;
   }
 
   const separator = content.endsWith('\n') ? '' : '\n';
-  writeFileSync(gitignorePath, `${content}${separator}.env.local\n`);
+  writeFileSync(gitignorePath, `${content}${separator}${filename}\n`);
 }
 
 interface EnvVars {
@@ -76,7 +78,40 @@ export function writeEnvLocal(installDir: string, envVars: Partial<EnvVars>): vo
     .map(([key, value]) => `${key}=${value}`)
     .join('\n');
 
-  ensureGitignore(installDir);
+  ensureGitignore(installDir, '.env.local');
+
+  writeFileSync(envPath, content + '\n');
+}
+
+/**
+ * Write WorkOS credentials to the appropriate env file for the project.
+ * Picks `.env.local` for JS projects (package.json present) or `.env` for
+ * everything else (Python/Django, Ruby/Rails, Go, ...). Skips cookie password
+ * generation outside the JS branch — non-JS SDKs don't use it.
+ *
+ * Used by pre-detection flows that write credentials before the framework
+ * integration is known (unclaimed env provisioning).
+ */
+export function writeCredentialsEnv(installDir: string, envVars: Partial<EnvVars>): void {
+  const hasPackageJson = existsSync(join(installDir, 'package.json'));
+  if (hasPackageJson) {
+    writeEnvLocal(installDir, envVars);
+    return;
+  }
+
+  const envPath = join(installDir, '.env');
+  let existingEnv: Record<string, string> = {};
+  if (existsSync(envPath)) {
+    const content = readFileSync(envPath, 'utf-8');
+    existingEnv = parseEnvFile(content);
+  }
+
+  const merged = { ...existingEnv, ...envVars };
+  const content = Object.entries(merged)
+    .map(([key, value]) => `${key}=${value}`)
+    .join('\n');
+
+  ensureGitignore(installDir, '.env');
 
   writeFileSync(envPath, content + '\n');
 }
