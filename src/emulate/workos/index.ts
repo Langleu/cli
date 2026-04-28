@@ -131,7 +131,9 @@ export interface WorkOSSeedPermission {
 }
 
 export interface WorkOSSeedWebhookEndpoint {
-  url: string;
+  endpoint_url?: string;
+  /** @deprecated Use endpoint_url */
+  url?: string;
   events?: string[];
   enabled?: boolean;
 }
@@ -315,9 +317,13 @@ export function seedFromConfig(store: Store, _baseUrl: string, config: WorkOSSee
 
   if (config.webhookEndpoints) {
     for (const whConfig of config.webhookEndpoints) {
+      const endpointUrl = whConfig.endpoint_url ?? whConfig.url;
+      if (!endpointUrl || typeof endpointUrl !== 'string') {
+        throw new Error('workos seed config: webhookEndpoints[].endpoint_url is required');
+      }
       ws.webhookEndpoints.insert({
         object: 'webhook_endpoint',
-        url: whConfig.url,
+        endpoint_url: endpointUrl,
         secret: randomBytes(32).toString('hex'),
         enabled: whConfig.enabled !== false,
         events: whConfig.events ?? [],

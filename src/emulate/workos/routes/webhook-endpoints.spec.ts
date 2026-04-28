@@ -22,12 +22,12 @@ describe('Webhook endpoint routes', () => {
   it('creates a webhook endpoint with auto-generated secret', async () => {
     const res = await req('/webhook_endpoints', {
       method: 'POST',
-      body: JSON.stringify({ url: 'http://localhost:3000/webhooks' }),
+      body: JSON.stringify({ endpoint_url: 'http://localhost:3000/webhooks' }),
     });
     expect(res.status).toBe(201);
     const ep = await json(res);
     expect(ep.object).toBe('webhook_endpoint');
-    expect(ep.url).toBe('http://localhost:3000/webhooks');
+    expect(ep.endpoint_url).toBe('http://localhost:3000/webhooks');
     expect(ep.secret).toHaveLength(64); // full hex secret on create
     expect(ep.enabled).toBe(true);
     expect(ep.events).toEqual([]);
@@ -38,7 +38,7 @@ describe('Webhook endpoint routes', () => {
     const res = await req('/webhook_endpoints', {
       method: 'POST',
       body: JSON.stringify({
-        url: 'http://localhost:3000/webhooks',
+        endpoint_url: 'http://localhost:3000/webhooks',
         secret: 'my_custom_secret',
         events: ['user.created', 'user.deleted'],
         description: 'Test endpoint',
@@ -53,7 +53,7 @@ describe('Webhook endpoint routes', () => {
   it('masks secret on GET', async () => {
     const createRes = await req('/webhook_endpoints', {
       method: 'POST',
-      body: JSON.stringify({ url: 'http://localhost:3000/webhooks' }),
+      body: JSON.stringify({ endpoint_url: 'http://localhost:3000/webhooks' }),
     });
     const created = await json(createRes);
 
@@ -66,7 +66,7 @@ describe('Webhook endpoint routes', () => {
   it('masks secret on list', async () => {
     await req('/webhook_endpoints', {
       method: 'POST',
-      body: JSON.stringify({ url: 'http://localhost:3000/webhooks' }),
+      body: JSON.stringify({ endpoint_url: 'http://localhost:3000/webhooks' }),
     });
 
     const listRes = await req('/webhook_endpoints');
@@ -78,7 +78,7 @@ describe('Webhook endpoint routes', () => {
   it('updates a webhook endpoint', async () => {
     const createRes = await req('/webhook_endpoints', {
       method: 'POST',
-      body: JSON.stringify({ url: 'http://localhost:3000/webhooks' }),
+      body: JSON.stringify({ endpoint_url: 'http://localhost:3000/webhooks' }),
     });
     const created = await json(createRes);
 
@@ -94,7 +94,7 @@ describe('Webhook endpoint routes', () => {
   it('deletes a webhook endpoint', async () => {
     const createRes = await req('/webhook_endpoints', {
       method: 'POST',
-      body: JSON.stringify({ url: 'http://localhost:3000/webhooks' }),
+      body: JSON.stringify({ endpoint_url: 'http://localhost:3000/webhooks' }),
     });
     const created = await json(createRes);
 
@@ -103,6 +103,31 @@ describe('Webhook endpoint routes', () => {
 
     const getRes = await req(`/webhook_endpoints/${created.id}`);
     expect(getRes.status).toBe(404);
+  });
+
+  it('accepts legacy url on create for backward compatibility', async () => {
+    const res = await req('/webhook_endpoints', {
+      method: 'POST',
+      body: JSON.stringify({ url: 'http://localhost:3000/legacy' }),
+    });
+    expect(res.status).toBe(201);
+    const ep = await json(res);
+    expect(ep.endpoint_url).toBe('http://localhost:3000/legacy');
+  });
+
+  it('accepts legacy url on update for backward compatibility', async () => {
+    const createRes = await req('/webhook_endpoints', {
+      method: 'POST',
+      body: JSON.stringify({ endpoint_url: 'http://localhost:3000/webhooks' }),
+    });
+    const created = await json(createRes);
+    const updateRes = await req(`/webhook_endpoints/${created.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ url: 'http://localhost:3000/updated-legacy' }),
+    });
+    expect(updateRes.status).toBe(200);
+    const updated = await json(updateRes);
+    expect(updated.endpoint_url).toBe('http://localhost:3000/updated-legacy');
   });
 
   it('returns 422 for missing url', async () => {
