@@ -130,6 +130,15 @@ export interface WorkOSSeedPermission {
   description?: string;
 }
 
+export interface WorkOSSeedFeatureFlag {
+  slug: string;
+  name: string;
+  description?: string;
+  type: 'boolean' | 'string' | 'number';
+  default_value: unknown;
+  enabled?: boolean;
+}
+
 export interface WorkOSSeedWebhookEndpoint {
   endpoint_url?: string;
   /** @deprecated Use endpoint_url */
@@ -146,6 +155,7 @@ export interface WorkOSSeedConfig {
   invitations?: WorkOSSeedInvitation[];
   roles?: WorkOSSeedRole[];
   permissions?: WorkOSSeedPermission[];
+  featureFlags?: WorkOSSeedFeatureFlag[];
   webhookEndpoints?: WorkOSSeedWebhookEndpoint[];
 }
 
@@ -295,6 +305,24 @@ export function seedFromConfig(store: Store, _baseUrl: string, config: WorkOSSee
           }
         }
       }
+    }
+  }
+
+  if (config.featureFlags) {
+    for (const flagConfig of config.featureFlags) {
+      if (!flagConfig.slug || !flagConfig.name || !flagConfig.type || flagConfig.default_value === undefined) {
+        throw new Error('workos seed config: featureFlags[].slug, name, type, and default_value are required');
+      }
+
+      ws.featureFlags.insert({
+        object: 'feature_flag',
+        slug: flagConfig.slug,
+        name: flagConfig.name,
+        description: flagConfig.description ?? null,
+        type: flagConfig.type,
+        default_value: flagConfig.default_value,
+        enabled: flagConfig.enabled ?? false,
+      });
     }
   }
 

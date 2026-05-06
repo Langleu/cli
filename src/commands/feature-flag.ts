@@ -1,10 +1,21 @@
 import chalk from 'chalk';
 import { createWorkOSClient } from '../lib/workos-client.js';
 import { formatTable } from '../utils/table.js';
-import { outputSuccess, outputJson, isJsonMode } from '../utils/output.js';
+import { outputSuccess, outputJson, isJsonMode, exitWithError } from '../utils/output.js';
 import { createApiErrorHandler } from '../lib/api-error-handler.js';
 
 const handleApiError = createApiErrorHandler('FeatureFlag');
+
+export type FeatureFlagType = 'boolean' | 'string' | 'number';
+
+export interface FeatureFlagCreateOptions {
+  slug?: string;
+  name?: string;
+  description?: string;
+  type?: FeatureFlagType;
+  defaultValue?: string | number | boolean;
+  enabled?: boolean;
+}
 
 export interface FeatureFlagListOptions {
   limit?: number;
@@ -57,6 +68,51 @@ export async function runFeatureFlagList(
     } else if (after) {
       console.log(chalk.dim(`After: ${after}`));
     }
+  } catch (error) {
+    handleApiError(error);
+  }
+}
+
+function parseDefaultValue(type: FeatureFlagType, value: string | number | boolean): string | number | boolean {
+  if (typeof value !== 'string') return value;
+  if (type === 'string') return value;
+
+  try {
+    return JSON.parse(value) as string | number | boolean;
+  } catch {
+    return value;
+  }
+}
+
+export async function runFeatureFlagCreate(
+  options: FeatureFlagCreateOptions,
+  apiKey: string,
+  baseUrl?: string,
+): Promise<void> {
+  const slug = options.slug?.trim();
+  const name = options.name?.trim();
+
+  if (!slug || !name || !options.type || options.defaultValue === undefined) {
+    return exitWithError({
+      code: 'missing_args',
+      message: 'Provide --slug, --name, --type, and --default-value to create a feature flag.',
+    });
+  }
+
+  const client = createWorkOSClient(apiKey, baseUrl);
+  const defaultValue = parseDefaultValue(options.type, options.defaultValue);
+
+  try {
+    const result = await client.featureFlags.create({
+      slug,
+      name,
+      ...(options.description !== undefined && { description: options.description }),
+      type: options.type,
+      default_value: defaultValue,
+      enabled: options.enabled ?? false,
+    });
+
+    outputSuccess('Created feature flag', result);
   } catch (error) {
     handleApiError(error);
   }

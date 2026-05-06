@@ -49,10 +49,58 @@ describe('workos-client', () => {
     it('exposes sdk, webhooks, redirectUris, corsOrigins, homepageUrl', () => {
       const client = createWorkOSClient('sk_test_123');
       expect(client.sdk).toBeDefined();
+      expect(client.featureFlags).toBeDefined();
       expect(client.webhooks).toBeDefined();
       expect(client.redirectUris).toBeDefined();
       expect(client.corsOrigins).toBeDefined();
       expect(client.homepageUrl).toBeDefined();
+    });
+  });
+
+  describe('featureFlags', () => {
+    it('create calls correct path with snake_case body', async () => {
+      const mockFlag = { id: 'ff_123', slug: 'coffee', enabled: false };
+      mockRequest.mockResolvedValue(mockFlag);
+
+      const client = createWorkOSClient('sk_test_123', 'https://api.workos.com');
+      const result = await client.featureFlags.create({
+        slug: 'coffee',
+        name: 'Coffee',
+        description: 'Coffee mode',
+        type: 'boolean',
+        default_value: false,
+        enabled: true,
+      });
+
+      expect(mockRequest).toHaveBeenCalledWith(
+        expect.objectContaining({
+          method: 'POST',
+          path: '/feature-flags',
+          body: {
+            slug: 'coffee',
+            name: 'Coffee',
+            description: 'Coffee mode',
+            type: 'boolean',
+            default_value: false,
+            enabled: true,
+          },
+        }),
+      );
+      expect(result).toBe(mockFlag);
+    });
+
+    it('delete calls correct path', async () => {
+      mockRequest.mockResolvedValue(null);
+
+      const client = createWorkOSClient('sk_test_123', 'https://api.workos.com');
+      await client.featureFlags.delete('coffee');
+
+      expect(mockRequest).toHaveBeenCalledWith(
+        expect.objectContaining({
+          method: 'DELETE',
+          path: '/feature-flags/coffee',
+        }),
+      );
     });
   });
 

@@ -11,13 +11,20 @@ const mockSdk = {
   },
 };
 
+const mockFeatureFlags = {
+  create: vi.fn(),
+  delete: vi.fn(),
+};
+
 vi.mock('../lib/workos-client.js', () => ({
-  createWorkOSClient: () => ({ sdk: mockSdk }),
+  createWorkOSClient: () => ({ sdk: mockSdk, featureFlags: mockFeatureFlags }),
 }));
 
 const { setOutputMode } = await import('../utils/output.js');
+const { WorkOSApiError } = await import('../lib/workos-api.js');
 
 const {
+  runFeatureFlagCreate,
   runFeatureFlagList,
   runFeatureFlagGet,
   runFeatureFlagEnable,
@@ -40,12 +47,17 @@ const mockFlag = {
 
 describe('feature-flag commands', () => {
   let consoleOutput: string[];
+  let consoleErrors: string[];
 
   beforeEach(() => {
     vi.clearAllMocks();
     consoleOutput = [];
+    consoleErrors = [];
     vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
       consoleOutput.push(args.map(String).join(' '));
+    });
+    vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      consoleErrors.push(args.map(String).join(' '));
     });
   });
 
@@ -92,6 +104,109 @@ describe('feature-flag commands', () => {
       await runFeatureFlagList({}, 'sk_test');
       expect(consoleOutput.some((l) => l.includes('cursor_b'))).toBe(true);
       expect(consoleOutput.some((l) => l.includes('cursor_a'))).toBe(true);
+    });
+  });
+
+  describe('runFeatureFlagCreate', () => {
+    it('creates a feature flag in human mode', async () => {
+      mockFeatureFlags.create.mockResolvedValue({
+        object: 'feature_flag',
+        slug: 'coffee',
+        name: 'Coffee',
+        description: 'Coffee mode',
+        type: 'boolean',
+        default_value: false,
+        enabled: true,
+      });
+
+      await runFeatureFlagCreate(
+        {
+          slug: 'coffee',
+          name: 'Coffee',
+          description: 'Coffee mode',
+          type: 'boolean',
+          defaultValue: 'false',
+          enabled: true,
+        },
+        'sk_test',
+      );
+
+      expect(mockFeatureFlags.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          slug: 'coffee',
+          name: 'Coffee',
+          type: 'boolean',
+          default_value: false,
+          enabled: true,
+        }),
+      );
+      expect(consoleOutput.some((l) => l.includes('Created feature flag'))).toBe(true);
+    });
+
+    it('creates a feature flag in JSON mode', async () => {
+      setOutputMode('json');
+      mockFeatureFlags.create.mockResolvedValue({
+        object: 'feature_flag',
+        slug: 'coffee',
+        name: 'Coffee',
+        description: null,
+        type: 'string',
+        default_value: 'on',
+        enabled: false,
+      });
+
+      await runFeatureFlagCreate(
+        {
+          slug: 'coffee',
+          name: 'Coffee',
+          type: 'string',
+          defaultValue: 'on',
+        },
+        'sk_test',
+      );
+
+      const output = JSON.parse(consoleOutput[0]);
+      expect(output.status).toBe('ok');
+      expect(output.message).toBe('Created feature flag');
+      expect(output.data.slug).toBe('coffee');
+      setOutputMode('human');
+    });
+
+    it('exits when required fields are missing', async () => {
+      const mockExit = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+
+      await runFeatureFlagCreate(
+        {
+          slug: 'coffee',
+          type: 'boolean',
+          defaultValue: 'false',
+        } as any,
+        'sk_test',
+      );
+
+      expect(mockExit).toHaveBeenCalledWith(1);
+      expect(mockFeatureFlags.create).not.toHaveBeenCalled();
+      expect(consoleErrors.some((l) => l.includes('Provide --slug, --name, --type, and --default-value'))).toBe(true);
+    });
+
+    it('maps API validation errors', async () => {
+      const mockExit = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+      mockFeatureFlags.create.mockRejectedValue(
+        new WorkOSApiError('Feature flag with this slug already exists', 422, 'duplicate'),
+      );
+
+      await runFeatureFlagCreate(
+        {
+          slug: 'coffee',
+          name: 'Coffee',
+          type: 'boolean',
+          defaultValue: 'false',
+        },
+        'sk_test',
+      );
+
+      expect(mockExit).toHaveBeenCalledWith(1);
+      expect(consoleErrors.some((l) => l.includes('Feature flag with this slug already exists'))).toBe(true);
     });
   });
 

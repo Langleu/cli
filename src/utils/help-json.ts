@@ -815,6 +815,36 @@ const commands: CommandSchema[] = [
     commands: [
       { name: 'list', description: 'List feature flags', options: [...paginationOpts] },
       {
+        name: 'create',
+        description: 'Create a feature flag',
+        options: [
+          { name: 'slug', type: 'string', description: 'Feature flag slug', required: true, hidden: false },
+          { name: 'name', type: 'string', description: 'Feature flag name', required: true, hidden: false },
+          { name: 'description', type: 'string', description: 'Feature flag description', required: false, hidden: false },
+          {
+            name: 'type',
+            type: 'string',
+            description: 'Feature flag value type',
+            required: true,
+            hidden: false,
+          },
+          {
+            name: 'default-value',
+            type: 'string',
+            description: 'Default flag value',
+            required: true,
+            hidden: false,
+          },
+          {
+            name: 'enabled',
+            type: 'boolean',
+            description: 'Create the flag enabled',
+            required: false,
+            hidden: false,
+          },
+        ],
+      },
+      {
         name: 'get',
         description: 'Get a feature flag',
         positionals: [{ name: 'slug', type: 'string', description: 'Feature flag slug', required: true }],

@@ -1,4 +1,4 @@
-import { type RouteContext, notFound, parseJsonBody, parseListParams } from '../../core/index.js';
+import { type RouteContext, notFound, validationError, parseJsonBody, parseListParams } from '../../core/index.js';
 import { getWorkOSStore, type WorkOSStore } from '../store.js';
 import { formatFeatureFlag, formatFlagTarget, formatListResponse } from '../helpers.js';
 
@@ -18,6 +18,44 @@ function evaluateFlags(ws: WorkOSStore, resourceId: string) {
 export function featureFlagRoutes(ctx: RouteContext): void {
   const { app, store } = ctx;
   const ws = getWorkOSStore(store);
+
+  app.post('/feature-flags', async (c) => {
+    const body = await parseJsonBody(c);
+    const slug = (body.slug as string | undefined)?.trim();
+    const name = (body.name as string | undefined)?.trim();
+    const type = body.type as 'boolean' | 'string' | 'number' | undefined;
+    const defaultValue = body.default_value ?? body.defaultValue;
+
+    if (!slug) {
+      throw validationError('slug is required', [{ field: 'slug', code: 'required' }]);
+    }
+    if (!name) {
+      throw validationError('name is required', [{ field: 'name', code: 'required' }]);
+    }
+    if (!type || !['boolean', 'string', 'number'].includes(type)) {
+      throw validationError('type must be boolean, string, or number', [{ field: 'type', code: 'invalid' }]);
+    }
+    if (defaultValue === undefined) {
+      throw validationError('default_value is required', [{ field: 'default_value', code: 'required' }]);
+    }
+
+    const existing = ws.featureFlags.findOneBy('slug', slug);
+    if (existing) {
+      throw validationError('Feature flag with this slug already exists', [{ field: 'slug', code: 'duplicate' }]);
+    }
+
+    const flag = ws.featureFlags.insert({
+      object: 'feature_flag',
+      slug,
+      name,
+      description: (body.description as string) ?? null,
+      type,
+      default_value: defaultValue,
+      enabled: body.enabled === true,
+    });
+
+    return c.json(formatFeatureFlag(flag), 201);
+  });
 
   // List all flags
   app.get('/feature-flags', (c) => {
@@ -90,6 +128,15 @@ export function featureFlagRoutes(ctx: RouteContext): void {
     if (!target) throw notFound('FlagTarget');
 
     ws.flagTargets.delete(target.id);
+    return c.body(null, 204);
+  });
+
+  app.delete('/feature-flags/:slug', (c) => {
+    const flag = ws.featureFlags.findOneBy('slug', c.req.param('slug'));
+    if (!flag) throw notFound('FeatureFlag');
+
+    ws.flagTargets.deleteBy('flag_slug', flag.slug);
+    ws.featureFlags.delete(flag.id);
     return c.body(null, 204);
   });
 

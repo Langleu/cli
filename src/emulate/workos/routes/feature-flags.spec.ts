@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { createServer, type ApiKeyMap, type Store } from '../../core/index.js';
-import { workosPlugin } from '../index.js';
+import { seedFromConfig, workosPlugin } from '../index.js';
 import { getWorkOSStore } from '../store.js';
 
 const apiKeys: ApiKeyMap = { sk_test_org: { environment: 'test' } };
@@ -36,6 +36,25 @@ describe('Feature Flags routes', () => {
     });
   }
 
+  it('creates a feature flag', async () => {
+    const res = await req('/feature-flags', {
+      method: 'POST',
+      body: JSON.stringify({
+        slug: 'coffee-mode',
+        name: 'Coffee Mode',
+        description: 'Enables coffee',
+        type: 'boolean',
+        default_value: false,
+        enabled: false,
+      }),
+    });
+    expect(res.status).toBe(201);
+    const flag = await json(res);
+    expect(flag.slug).toBe('coffee-mode');
+    expect(flag.default_value).toBe(false);
+    expect(flag.enabled).toBe(false);
+  });
+
   it('lists feature flags', async () => {
     seedFlag();
     const res = await req('/feature-flags');
@@ -58,6 +77,14 @@ describe('Feature Flags routes', () => {
   it('returns 404 for nonexistent flag', async () => {
     const res = await req('/feature-flags/nonexistent');
     expect(res.status).toBe(404);
+  });
+
+  it('deletes a flag', async () => {
+    seedFlag('temp-flag', true);
+    const delRes = await req('/feature-flags/temp-flag', { method: 'DELETE' });
+    expect(delRes.status).toBe(204);
+    const getRes = await req('/feature-flags/temp-flag');
+    expect(getRes.status).toBe(404);
   });
 
   it('enables a flag', async () => {
@@ -135,5 +162,29 @@ describe('Feature Flags routes', () => {
     const res = await req('/user_management/users/user_123/feature-flags');
     const list = await json(res);
     expect(list.data[0].value).toBe(null);
+  });
+
+  it('seeds feature flags from config', async () => {
+    const { app: seededApp, store: seededStore } = createTestApp();
+
+    seedFromConfig(seededStore, 'http://localhost:0', {
+      featureFlags: [
+        {
+          slug: 'coffee-mode',
+          name: 'Coffee Mode',
+          description: 'Enables coffee',
+          type: 'boolean',
+          default_value: false,
+          enabled: true,
+        },
+      ],
+    });
+
+    const res = await seededApp.request('/feature-flags', { headers });
+    expect(res.status).toBe(200);
+    const list = (await res.json()) as any;
+    expect(list.data).toHaveLength(1);
+    expect(list.data[0].slug).toBe('coffee-mode');
+    expect(list.data[0].enabled).toBe(true);
   });
 });

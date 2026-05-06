@@ -6,6 +6,7 @@ export interface JWTPayload {
   org_id?: string;
   role?: string;
   permissions?: string[];
+  feature_flags?: string[];
   iss: string;
   aud: string;
   exp: number;

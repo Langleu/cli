@@ -29,6 +29,17 @@ export interface AuditLogRetention {
 
 export interface WorkOSCLIClient {
   sdk: WorkOS;
+  featureFlags: {
+    create(options: {
+      slug: string;
+      name: string;
+      description?: string | null;
+      type: 'boolean' | 'string' | 'number';
+      default_value: unknown;
+      enabled?: boolean;
+    }): Promise<Record<string, unknown>>;
+    delete(slug: string): Promise<void>;
+  };
   webhooks: {
     list(): Promise<WorkOSListResponse<WebhookEndpoint>>;
     create(endpointUrl: string, events: string[]): Promise<WebhookEndpoint>;
@@ -69,6 +80,33 @@ export function createWorkOSClient(apiKey?: string, baseUrl?: string): WorkOSCLI
 
   return {
     sdk,
+
+    featureFlags: {
+      async create(options) {
+        return workosRequest<Record<string, unknown>>({
+          method: 'POST',
+          path: '/feature-flags',
+          apiKey: key,
+          baseUrl: base,
+          body: {
+            slug: options.slug,
+            name: options.name,
+            ...(options.description !== undefined && { description: options.description }),
+            type: options.type,
+            default_value: options.default_value,
+            enabled: options.enabled ?? false,
+          },
+        });
+      },
+      async delete(slug: string) {
+        await workosRequest({
+          method: 'DELETE',
+          path: `/feature-flags/${encodeURIComponent(slug)}`,
+          apiKey: key,
+          baseUrl: base,
+        });
+      },
+    },
 
     webhooks: {
       async list() {

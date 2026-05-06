@@ -19,6 +19,23 @@ interface PendingAuth {
   auth_method: string;
 }
 
+function resolveFeatureFlags(ws: ReturnType<typeof getWorkOSStore>, userId: string, organizationId: string | null) {
+  const result: string[] = [];
+
+  for (const flag of ws.featureFlags.all()) {
+    const targets = ws.flagTargets.findBy('flag_slug', flag.slug);
+    const userTarget = targets.find((t) => t.resource_id === userId);
+    const orgTarget = organizationId ? targets.find((t) => t.resource_id === organizationId) : undefined;
+    const value = userTarget ? userTarget.value : orgTarget ? orgTarget.value : flag.enabled ? flag.default_value : false;
+
+    if (value === true) {
+      result.push(flag.slug);
+    }
+  }
+
+  return result;
+}
+
 export function authRoutes(ctx: RouteContext): void {
   const { app, store, jwt } = ctx;
   const ws = getWorkOSStore(store);
@@ -372,6 +389,7 @@ export function authRoutes(ctx: RouteContext): void {
       org_id: organizationId ?? undefined,
       role: roleSlug,
       permissions: permissionSlugs,
+      feature_flags: resolveFeatureFlags(ws, user.id, organizationId),
       aud: clientId ?? 'workos-emulate',
     });
 

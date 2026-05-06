@@ -27,8 +27,13 @@ const mockExtensions = {
   homepageUrl: { set: vi.fn() },
 };
 
+const mockFeatureFlags = {
+  create: vi.fn(),
+  delete: vi.fn(),
+};
+
 vi.mock('../lib/workos-client.js', () => ({
-  createWorkOSClient: () => ({ sdk: mockSdk, ...mockExtensions }),
+  createWorkOSClient: () => ({ sdk: mockSdk, ...mockExtensions, featureFlags: mockFeatureFlags }),
 }));
 
 const { setOutputMode } = await import('../utils/output.js');
@@ -59,6 +64,12 @@ config:
   redirect_uris: ["http://localhost:3000/callback"]
   cors_origins: ["http://localhost:3000"]
   homepage_url: "http://localhost:3000"
+featureFlags:
+  - slug: "coffee-mode"
+    name: "Coffee Mode"
+    type: "boolean"
+    default_value: false
+    enabled: true
 `;
 
 describe('seed command', () => {
@@ -92,6 +103,7 @@ describe('seed command', () => {
       expect(content).toContain('roles:');
       expect(content).toContain('organizations:');
       expect(content).toContain('config:');
+      expect(content).toContain('featureFlags:');
       expect(content).toContain('redirect_uris:');
       expect(consoleOutput.some((l) => l.includes('Created'))).toBe(true);
     });
@@ -129,7 +141,7 @@ describe('seed command', () => {
   });
 
   describe('runSeed with --file', () => {
-    it('creates resources in dependency order: permissions → roles → orgs → config', async () => {
+    it('creates resources in dependency order: permissions → roles → orgs → config → feature flags', async () => {
       mockExistsSync.mockReturnValue(true);
       mockReadFileSync.mockReturnValue(FULL_SEED_YAML);
       mockSdk.authorization.createPermission.mockResolvedValue({ slug: 'read-users' });
@@ -139,6 +151,7 @@ describe('seed command', () => {
       mockExtensions.redirectUris.add.mockResolvedValue({ success: true, alreadyExists: false });
       mockExtensions.corsOrigins.add.mockResolvedValue({ success: true, alreadyExists: false });
       mockExtensions.homepageUrl.set.mockResolvedValue(undefined);
+      mockFeatureFlags.create.mockResolvedValue({ slug: 'coffee-mode' });
 
       await runSeed({ file: 'workos-seed.yml' }, 'sk_test');
 
@@ -171,6 +184,14 @@ describe('seed command', () => {
       expect(mockExtensions.redirectUris.add).toHaveBeenCalledWith('http://localhost:3000/callback');
       expect(mockExtensions.corsOrigins.add).toHaveBeenCalledWith('http://localhost:3000');
       expect(mockExtensions.homepageUrl.set).toHaveBeenCalledWith('http://localhost:3000');
+      expect(mockFeatureFlags.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          slug: 'coffee-mode',
+          type: 'boolean',
+          default_value: false,
+          enabled: true,
+        }),
+      );
 
       // State file written
       expect(mockWriteFileSync).toHaveBeenCalled();
@@ -178,6 +199,7 @@ describe('seed command', () => {
       expect(stateArg.permissions).toHaveLength(2);
       expect(stateArg.roles).toHaveLength(2);
       expect(stateArg.organizations).toHaveLength(1);
+      expect(stateArg.featureFlags).toHaveLength(1);
     });
 
     it('skips already-existing permissions without failing', async () => {
@@ -293,21 +315,24 @@ config:
   });
 
   describe('runSeed --clean', () => {
-    it('deletes resources in reverse order: orgs → permissions', async () => {
+    it('deletes resources in reverse order: feature flags → orgs → permissions', async () => {
       mockExistsSync.mockReturnValue(true);
       mockReadFileSync.mockReturnValue(
         JSON.stringify({
           permissions: [{ slug: 'read-users' }, { slug: 'write-users' }],
           roles: [{ slug: 'admin' }],
           organizations: [{ id: 'org_123', name: 'Test Org' }],
+          featureFlags: [{ slug: 'coffee-mode' }],
           createdAt: '2024-01-01',
         }),
       );
       mockSdk.organizations.deleteOrganization.mockResolvedValue(undefined);
       mockSdk.authorization.deletePermission.mockResolvedValue(undefined);
+      mockFeatureFlags.delete.mockResolvedValue(undefined);
 
       await runSeed({ clean: true }, 'sk_test');
 
+      expect(mockFeatureFlags.delete).toHaveBeenCalledWith('coffee-mode');
       expect(mockSdk.organizations.deleteOrganization).toHaveBeenCalledWith('org_123');
       expect(mockSdk.authorization.deletePermission).toHaveBeenCalledWith('write-users');
       expect(mockSdk.authorization.deletePermission).toHaveBeenCalledWith('read-users');
@@ -321,6 +346,7 @@ config:
           permissions: [],
           roles: [{ slug: 'admin' }],
           organizations: [],
+          featureFlags: [],
           createdAt: '2024-01-01',
         }),
       );
@@ -337,11 +363,13 @@ config:
           permissions: [{ slug: 'stuck' }],
           roles: [],
           organizations: [{ id: 'org_stuck', name: 'Stuck Org' }],
+          featureFlags: [{ slug: 'stuck-flag' }],
           createdAt: '2024-01-01',
         }),
       );
       mockSdk.organizations.deleteOrganization.mockRejectedValue(new Error('Cannot delete'));
       mockSdk.authorization.deletePermission.mockRejectedValue(new Error('Cannot delete'));
+      mockFeatureFlags.delete.mockRejectedValue(new Error('Cannot delete'));
 
       await runSeed({ clean: true }, 'sk_test');
 
@@ -383,7 +411,13 @@ permissions:
     it('outputs JSON success on clean', async () => {
       mockExistsSync.mockReturnValue(true);
       mockReadFileSync.mockReturnValue(
-        JSON.stringify({ permissions: [], roles: [], organizations: [], createdAt: '2024-01-01' }),
+        JSON.stringify({
+          permissions: [],
+          roles: [],
+          organizations: [],
+          featureFlags: [],
+          createdAt: '2024-01-01',
+        }),
       );
 
       await runSeed({ clean: true }, 'sk_test');

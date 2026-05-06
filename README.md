@@ -115,7 +115,7 @@ The compound workflow commands compose multiple API calls into common operations
 
 #### seed — Declarative resource provisioning
 
-Provision permissions, roles, organizations, and config from a YAML file. Tracks created resources for clean teardown.
+Provision permissions, roles, organizations, config, and feature flags from a YAML file. Tracks created resources for clean teardown.
 
 ```bash
 # Apply a seed file
@@ -152,9 +152,27 @@ config:
   cors_origins:
     - http://localhost:3000
   homepage_url: http://localhost:3000
+
+featureFlags:
+  - slug: coffee-mode
+    name: Coffee Mode
+    description: Enables the coffee experience
+    type: boolean
+    default_value: false
+    enabled: false
 ```
 
-Resources are created in dependency order (permissions → roles → organizations → config). State is tracked in `.workos-seed-state.json` so `--clean` removes exactly what was created.
+Resources are created in dependency order (permissions → roles → organizations → config → feature flags). State is tracked in `.workos-seed-state.json` so `--clean` removes exactly what was created.
+
+#### feature-flag — Create and manage feature flags
+
+```bash
+# Create a feature flag
+workos feature-flag create --slug coffee-mode --name "Coffee Mode" --type boolean --default-value false
+
+# Turn it on later
+workos feature-flag enable coffee-mode
+```
 
 #### setup-org — One-shot organization onboarding
 

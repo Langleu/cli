@@ -1527,6 +1527,38 @@ yargs(rawArgs)
     );
     registerSubcommand(
       yargs,
+      'create',
+      'Create a feature flag',
+      (y) =>
+        y.options({
+          slug: { type: 'string', demandOption: true },
+          name: { type: 'string', demandOption: true },
+          description: { type: 'string' },
+          type: { type: 'string' as const, choices: ['boolean', 'string', 'number'] as const, demandOption: true },
+          'default-value': { type: 'string' as const, demandOption: true, describe: 'Default flag value' },
+          enabled: { type: 'boolean' as const, default: false },
+        }),
+      async (argv) => {
+        await applyInsecureStorage(argv.insecureStorage);
+
+        const { resolveApiKey, resolveApiBaseUrl } = await import('./lib/api-key.js');
+        const { runFeatureFlagCreate } = await import('./commands/feature-flag.js');
+        await runFeatureFlagCreate(
+          {
+            slug: argv.slug,
+            name: argv.name,
+            description: argv.description,
+            type: argv.type as 'boolean' | 'string' | 'number',
+            defaultValue: argv.defaultValue,
+            enabled: argv.enabled,
+          },
+          resolveApiKey({ apiKey: argv.apiKey }),
+          resolveApiBaseUrl(),
+        );
+      },
+    );
+    registerSubcommand(
+      yargs,
       'get <slug>',
       'Get a feature flag',
       (y) => y.positional('slug', { type: 'string', demandOption: true }),

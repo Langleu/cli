@@ -11,6 +11,14 @@ interface SeedConfig {
   organizations?: Array<{ name: string; domains?: string[] }>;
   permissions?: Array<{ name: string; slug: string; description?: string }>;
   roles?: Array<{ name: string; slug: string; description?: string; permissions?: string[] }>;
+  featureFlags?: Array<{
+    slug: string;
+    name: string;
+    description?: string;
+    type: 'boolean' | 'string' | 'number';
+    default_value: unknown;
+    enabled?: boolean;
+  }>;
   config?: {
     redirect_uris?: string[];
     cors_origins?: string[];
@@ -22,13 +30,21 @@ interface SeedState {
   permissions: Array<{ slug: string }>;
   roles: Array<{ slug: string }>;
   organizations: Array<{ id: string; name: string }>;
+  featureFlags: Array<{ slug: string }>;
   createdAt: string;
 }
 
 function loadState(): SeedState | null {
   if (!existsSync(STATE_FILE)) return null;
   try {
-    return JSON.parse(readFileSync(STATE_FILE, 'utf-8'));
+    const parsed = JSON.parse(readFileSync(STATE_FILE, 'utf-8')) as Partial<SeedState>;
+    return {
+      permissions: parsed.permissions ?? [],
+      roles: parsed.roles ?? [],
+      organizations: parsed.organizations ?? [],
+      featureFlags: parsed.featureFlags ?? [],
+      createdAt: parsed.createdAt ?? new Date().toISOString(),
+    };
   } catch {
     return null;
   }
@@ -41,7 +57,7 @@ function saveState(state: SeedState): void {
 const DEFAULT_SEED_FILE = 'workos-seed.yml';
 
 const SEED_TEMPLATE = `# WorkOS seed file — provision resources with \`workos seed --file=${DEFAULT_SEED_FILE}\`
-# Resources are created in dependency order: permissions → roles → organizations → config.
+# Resources are created in order: permissions → roles → organizations → config → feature flags.
 # Existing resources are skipped (idempotent). Run \`workos seed --clean\` to tear down.
 
 permissions:
@@ -74,6 +90,14 @@ config:
   cors_origins:
     - http://localhost:3000
   homepage_url: http://localhost:3000
+
+featureFlags:
+  - slug: coffee-mode
+    name: Coffee Mode
+    description: Enables the coffee experience
+    type: boolean
+    default_value: false
+    enabled: false
 `;
 
 export function runSeedInit(): void {
@@ -138,7 +162,13 @@ export async function runSeed(
   }
 
   const client = createWorkOSClient(apiKey, baseUrl);
-  const state: SeedState = { permissions: [], roles: [], organizations: [], createdAt: new Date().toISOString() };
+  const state: SeedState = {
+    permissions: [],
+    roles: [],
+    organizations: [],
+    featureFlags: [],
+    createdAt: new Date().toISOString(),
+  };
 
   try {
     // 1. Create permissions
@@ -222,6 +252,30 @@ export async function runSeed(
       await applyConfig(client, seedConfig.config);
     }
 
+    // 5. Create feature flags
+    if (seedConfig.featureFlags) {
+      for (const flag of seedConfig.featureFlags) {
+        try {
+          await client.featureFlags.create({
+            slug: flag.slug,
+            name: flag.name,
+            ...(flag.description && { description: flag.description }),
+            type: flag.type,
+            default_value: flag.default_value,
+            enabled: flag.enabled ?? false,
+          });
+          state.featureFlags.push({ slug: flag.slug });
+          if (!isJsonMode()) console.log(chalk.green(`  Created feature flag: ${flag.slug}`));
+        } catch (error: unknown) {
+          if (isAlreadyExists(error)) {
+            if (!isJsonMode()) console.log(chalk.dim(`  Feature flag exists: ${flag.slug} (skipped)`));
+          } else {
+            throw error;
+          }
+        }
+      }
+    }
+
     saveState(state);
 
     if (isJsonMode()) {
@@ -252,7 +306,16 @@ async function runSeedClean(apiKey: string, baseUrl?: string): Promise<void> {
 
   const client = createWorkOSClient(apiKey, baseUrl);
 
-  // Delete in reverse order: orgs → roles → permissions
+  for (const flag of state.featureFlags.reverse()) {
+    try {
+      await client.featureFlags.delete(flag.slug);
+      if (!isJsonMode()) console.log(chalk.green(`  Deleted feature flag: ${flag.slug}`));
+    } catch {
+      if (!isJsonMode()) console.log(chalk.yellow(`  Warning: Could not delete feature flag ${flag.slug}`));
+    }
+  }
+
+  // Delete in reverse order: feature flags → orgs → roles → permissions
   for (const org of state.organizations.reverse()) {
     try {
       await client.sdk.organizations.deleteOrganization(org.id);

@@ -21,8 +21,10 @@ describe('Auth routes', () => {
     store = server.store;
   });
 
-  const req = (path: string, init?: RequestInit) => app.request(path, { headers, ...init });
-  const json = (res: Response) => res.json() as Promise<any>;
+const req = (path: string, init?: RequestInit) => app.request(path, { headers, ...init });
+const json = (res: Response) => res.json() as Promise<any>;
+const decodeJwtPayload = (token: string) =>
+  JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8')) as Record<string, unknown>;
 
   async function createUser(
     email: string,
@@ -81,6 +83,37 @@ describe('Auth routes', () => {
     expect(body.access_token).toBeDefined();
     expect(body.user.email).toBe('pass@test.com');
     expect(body.authentication_method).toBe('Password');
+  });
+
+  it('includes feature flag values in the access token', async () => {
+    const ws = getWorkOSStore(store);
+    ws.featureFlags.insert({
+      object: 'feature_flag',
+      slug: 'user-management',
+      name: 'User Management',
+      description: 'Enable user management',
+      type: 'boolean',
+      default_value: true,
+      enabled: true,
+    });
+
+    await req('/user_management/users', {
+      method: 'POST',
+      body: JSON.stringify({ email: 'flags@test.com', password: 'secret' }),
+    });
+
+    const res = await app.request('/user_management/authenticate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        grant_type: 'password',
+        email: 'flags@test.com',
+        password: 'secret',
+      }),
+    });
+    const body = await json(res);
+    const payload = decodeJwtPayload(body.access_token);
+    expect(payload.feature_flags).toContain('user-management');
   });
 
   it('rejects invalid password', async () => {
